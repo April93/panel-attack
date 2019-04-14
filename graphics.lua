@@ -467,14 +467,16 @@ function Stack.render_cursor(self)
   local shake = ceil((shake_arr[shake_idx] or 0) * 13)
   if self.countdown_timer then
     if self.CLOCK % 2 == 0 then
+      local cur_w, cur_h = IMG_cursor[1]:getDimensions()
       draw(IMG_cursor[1],
         (self.cur_col-1)*16+self.pos_x-4,
-        (11-(self.cur_row))*16+self.pos_y-4+self.displacement-shake)
+        (11-(self.cur_row))*16+self.pos_y-4+self.displacement-shake, 0, 40/cur_w, 24/cur_h)
     end
   else
+    local cur_w, cur_h = IMG_cursor[(floor(self.CLOCK/16)%2)+1]:getDimensions()
     draw(IMG_cursor[(floor(self.CLOCK/16)%2)+1],
       (self.cur_col-1)*16+self.pos_x-4,
-      (11-(self.cur_row))*16+self.pos_y-4+self.displacement-shake)
+      (11-(self.cur_row))*16+self.pos_y-4+self.displacement-shake, 0, 40/cur_w, 24/cur_h)
   end
 end
 
@@ -487,17 +489,20 @@ function Stack.render_countdown(self)
     local countdown_y = self.pos_y + 64
     if self.countdown_CLOCK <= 8 then
       local ready_y = initial_ready_y + (self.CLOCK - 1) * ready_y_drop_speed
-      draw(IMG_ready, ready_x, ready_y)
+      local ready_w, ready_h = IMG_ready:getDimensions()
+      draw(IMG_ready, ready_x, ready_y, 0, 71/ready_w, 15/ready_h)
       if self.countdown_CLOCK == 8 then
         self.ready_y = ready_y
       end
     elseif self.countdown_CLOCK >= 9 and self.countdown_timer and self.countdown_timer > 0 then
       if self.countdown_timer >= 100 then
-        draw(IMG_ready, ready_x, self.ready_y or initial_ready_y + 8 * 6)
+        local ready_w, ready_h = IMG_ready:getDimensions()
+        draw(IMG_ready, ready_x, self.ready_y or initial_ready_y + 8 * 6, 0, 71/ready_w, 15/ready_h)
       end
       local IMG_number_to_draw = IMG_numbers[math.ceil(self.countdown_timer / 60)]
       if IMG_number_to_draw then
-        draw(IMG_number_to_draw, countdown_x, countdown_y)
+        local num_w, num_h = IMG_number_to_draw:getDimensions()
+        draw(IMG_number_to_draw, countdown_x, countdown_y, 0, 15/num_w, 15/num_h)
       end
     end
   end

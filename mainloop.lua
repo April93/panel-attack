@@ -1,3 +1,4 @@
+require("charselect")
 local wait, resume = coroutine.yield, coroutine.resume
 
 local main_select_mode, main_endless, make_main_puzzle, main_net_vs_setup,
@@ -131,6 +132,22 @@ menu_enter = menu_key_func({"return","kenter","z"}, {"swap1"}, false)
 menu_escape = menu_key_func({"escape","x"}, {"swap2"}, false)
 menu_backspace = menu_key_func({"backspace"}, {"backspace"}, true)
 
+function main_charselect_setup()
+  local ready, my_state, op_state
+  ready, my_state = main_charselect("single")
+  if ready then
+    P1 = Stack(1, "vs", my_state.level, my_state.character)
+    P1.garbage_target = P1
+    make_local_panels(P1, "000000")
+    make_local_gpanels(P1, "000000")
+    P1:starting_state()
+    main_local_vs_yourself()
+  else
+    return main_select_mode
+  end
+  return main_select_mode
+end
+
 do
   local active_idx = 1
   function main_select_mode()
@@ -165,7 +182,8 @@ do
         {"Configure input", main_config_input},
         {"Set name", main_set_name},
         {"Options", main_options},
-        {"Music test", main_music_test}
+        {"Music test", main_music_test},
+        {"Character Select", main_charselect_setup}
     }
     if love.graphics.getSupported("canvas") then
       items[#items+1] = {"Fullscreen (LAlt+Enter)", fullscreen}
@@ -467,10 +485,13 @@ function main_character_select()
             ,2))
     end
   end
+
+  --Init ranked setting to casual?
   if character_select_mode == "2p_net_vs" then
     match_type = match_type or "Casual"
     if match_type == "" then match_type = "Casual" end
   end
+
   match_type_message = match_type_message or ""
   local selected = false
   local active_str = "level"
@@ -602,8 +623,12 @@ function main_character_select()
   end
   print("got to LOC before net_vs_room character select loop")
   menu_clock = 0
+  --Main char select loop display+control
   while true do
     menu_clock = menu_clock + 1
+
+    --Start/Leave net match. Unrelated to char sel
+    --Character+Ranked+Level already assumed
     if character_select_mode == "2p_net_vs" then
       for _,msg in ipairs(this_frame_messages) do
         if msg.win_counts then
@@ -722,6 +747,8 @@ function main_character_select()
         end
       end
     end
+
+    --Draw ranking options okay to keep?
     if current_server_supports_ranking then
       draw_button(1,1,4,1,"match type desired")
       draw_button(1,5,2,1,"level")
@@ -730,6 +757,8 @@ function main_character_select()
     end
 
     draw_button(1,7,1,1,"ready")
+
+    --Draw character names/buttons
     for i=2,X do
       for j=1,Y do
         draw_button(i,j,1,1,character_display_names[map[i][j]] or map[i][j])
@@ -755,6 +784,7 @@ function main_character_select()
     end
     local state = ""
     --my state - add to be displayed
+    --Set display info about char select state
     state = state..my_name
     if current_server_supports_ranking then
       state = state..":  Rating: "..(global_current_room_ratings[my_player_number].league or "")
@@ -809,6 +839,8 @@ function main_character_select()
       --state = state.." "..json.encode(op_state)
     end
     gprint(state, 50, 50)
+
+    --Print ranked? Net code exclusive, needs to be moved?
     if character_select_mode == "2p_net_vs" then
       if not my_state.ranked and not op_state.ranked then
         match_type_message = ""
@@ -817,6 +849,9 @@ function main_character_select()
       gprint(match_type_message,100,85)
     end
     wait()
+
+    --Controlling char select menu, selecting options
+    --Lots of netcode needs to be moved out?
     if not currently_spectating then
         if menu_up(k) then
           if not selected then move_cursor(up) end
@@ -875,6 +910,8 @@ function main_character_select()
           return main_net_vs_lobby
         end
     end
+
+    --Single player start game (1P vs self) move outside? expand to support other modes?
     if my_state.ready and character_select_mode == "1p_vs_yourself" then
       P1 = Stack(1, "vs", my_state.level, my_state.character)
       P1.garbage_target = P1
@@ -883,6 +920,8 @@ function main_character_select()
       P1:starting_state()
       return main_dumb_transition, {main_local_vs_yourself, "Game is starting...", 30, 30}
     end
+
+    --For online play, shouldn't be in charselect
     if character_select_mode == "2p_net_vs" then
       do_messages()
     end
