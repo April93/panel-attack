@@ -132,18 +132,35 @@ menu_enter = menu_key_func({"return","kenter","z"}, {"swap1"}, false)
 menu_escape = menu_key_func({"escape","x"}, {"swap2"}, false)
 menu_backspace = menu_key_func({"backspace"}, {"backspace"}, true)
 
+function injecttest(op_state)
+  op_state.character = "windy"
+  op_state.cursor = "ready"
+  op_state.active_str = "ready"
+  op_state.ready = true
+  op_state.selected = true
+  gprint("Injecting Local OP Test", 50, 10)
+  return op_state
+end
+
 function main_charselect_setup()
-  local ready, my_state, op_state
-  ready, my_state = main_charselect("single")
+  local ready = true
+  local my_state, op_state
+  --ready, my_state, op_state = main_charselect("local", injecttest)
+  ready, my_state, op_state = main_charselect("local")
   if ready then
     P1 = Stack(1, "vs", my_state.level, my_state.character)
-    P1.garbage_target = P1
+    P2 = Stack(2, "vs", op_state.level, op_state.character)
+    P1.garbage_target = P2
+    P2.garbage_target = P1
+    P2.pos_x = 172
+    P2.score_x = 410
     make_local_panels(P1, "000000")
     make_local_gpanels(P1, "000000")
+    make_local_panels(P2, "000000")
+    make_local_gpanels(P2, "000000")
     P1:starting_state()
-    main_local_vs_yourself()
-  else
-    return main_select_mode
+    P2:starting_state()
+    return main_local_vs()
   end
   return main_select_mode
 end
@@ -345,6 +362,248 @@ function main_net_vs_room()
   character_select_mode = "2p_net_vs"
   return main_character_select()
 end
+
+function net_check(op)
+  local op_state = op
+  local my_state, op_state, match_type, match_type_message
+  local leave, start = false, false
+  for _,msg in ipairs(this_frame_messages) do
+    if msg.win_counts then
+      update_win_counts(msg.win_counts)
+    end
+    if msg.menu_state then
+      if currently_spectating then
+        if msg.player_number == 2 then
+          op_state = msg.menu_state
+        elseif msg.player_number == 1 then
+          my_state = msg.menu_state
+        end
+      else
+        op_state = msg.menu_state
+      end
+    end
+    if msg.ranked_match_approved then
+      match_type = "Ranked"
+      match_type_message = ""
+      if msg.caveats then
+        match_type_message = match_type_message..(msg.caveats[1] or "")
+      end
+    elseif msg.ranked_match_denied then
+      match_type = "Casual"
+      match_type_message = "Not ranked. "
+      if msg.reasons then
+        match_type_message = match_type_message..(msg.reasons[1] or "Reason unknown")
+      end
+    end
+    if msg.leave_room then
+      my_win_count = 0
+      op_win_count = 0
+      write_char_sel_settings_to_file()
+      leave = true
+    end
+    if msg.match_start or replay_of_match_so_far then
+      start = true
+    end
+  end
+  return op_state, my_state, {match_type, match_type_message}, leave, start
+end
+
+
+function do_leave()
+  my_win_count = 0
+  op_win_count = 0
+  write_char_sel_settings_to_file()
+  return json_send({leave_room=true})
+end
+function net_init()
+  local opponent_connected = false
+  local retries, retry_limit = 0, 250
+  while not global_initialize_room_msg and retries < retry_limit do
+    for _,msg in ipairs(this_frame_messages) do
+      if msg.create_room or msg.character_select or msg.spectate_request_granted then
+        global_initialize_room_msg = msg
+      end
+    end
+    gprint("Waiting for room initialization...", 300, 280)
+    wait()
+    do_messages()
+    retries = retries + 1
+  end
+  -- if room_number_last_spectated and retries >= retry_limit and currently_spectating then
+    -- request_spectate(room_number_last_spectated)
+    -- retries = 0
+    -- while not global_initialize_room_msg and retries < retry_limit do
+      -- for _,msg in ipairs(this_frame_messages) do
+        -- if msg.create_room or msg.character_select or msg.spectate_request_granted then
+          -- global_initialize_room_msg = msg
+        -- end
+      -- end
+      -- gprint("Lost connection.  Trying to rejoin...", 300, 280)
+      -- wait()
+      -- do_messages()
+      -- retries = retries + 1
+    -- end
+  -- end
+  if not global_initialize_room_msg then
+    return main_dumb_transition, {main_select_mode, "Failed to connect.\n\nReturning to main menu", 60, 300}
+  end
+  msg = global_initialize_room_msg
+  global_initialize_room_msg = nil
+  if msg.ratings then
+      global_current_room_ratings = msg.ratings
+  end
+  global_my_state = msg.a_menu_state
+  global_op_state = msg.b_menu_state
+  if msg.your_player_number then
+    my_player_number = msg.your_player_number
+  elseif currently_spectating then
+    my_player_number = 1
+  elseif my_player_number and my_player_number ~= 0 then
+    print("We assumed our player number is still "..my_player_number)
+  else
+    error("We never heard from the server as to what player number we are")
+    print("Error: The server never told us our player number.  Assuming it is 1")
+    my_player_number = 1
+  end
+  if msg.op_player_number then
+    op_player_number = msg.op_player_number or op_player_number
+  elseif currently_spectating then
+    op_player_number = 2
+  elseif op_player_number and op_player_number ~= 0 then
+    print("We assumed op player number is still "..op_player_number)
+  else
+    error("We never heard from the server as to what player number we are")
+    print("Error: The server never told us our player number.  Assuming it is 2")
+    op_player_number = 2
+  end
+  if msg.win_counts then
+    update_win_counts(msg.win_counts)
+  end
+  if msg.replay_of_match_so_far then
+    replay_of_match_so_far = msg.replay_of_match_so_far
+  end
+  if msg.ranked then
+    match_type = "Ranked"
+    match_type_message = ""
+  else
+    match_type = "Casual"
+  end
+  if currently_spectating then
+    P1 = {panel_buffer="", gpanel_buffer=""}
+    print("we reset P1 buffers at start of main_character_select()")
+  end
+  P2 = {panel_buffer="", gpanel_buffer=""}
+  print("we reset P2 buffers at start of main_character_select()")
+  print("current_server_supports_ranking: "..tostring(current_server_supports_ranking))
+  local cursor,op_cursor,X,Y
+  local startyn, my_state, op_state
+  local ranked = false
+  if current_server_supports_ranking then
+    map = {{"match type desired", "match type desired", "match type desired", "match type desired", "level", "level", "ready"},
+           {"random", "windy", "sherbet", "thiana", "ruby", "lip", "elias"},
+           {"flare", "neris", "seren", "phoenix", "dragon", "thanatos", "cordelia"},
+           {"lakitu", "bumpty", "poochy", "wiggler", "froggy", "blargg", "lungefish"},
+           {"raphael", "yoshi", "hookbill", "navalpiranha", "kamek", "bowser", "leave"}}
+    startyn, my_state, op_state = main_charselect("netranked", net_check, global_my_state, global_op_state)
+  else
+    map = {{"level", "level", "level", "level", "level", "level", "ready"},
+           {"random", "windy", "sherbet", "thiana", "ruby", "lip", "elias"},
+           {"flare", "neris", "seren", "phoenix", "dragon", "thanatos", "cordelia"},
+           {"lakitu", "bumpty", "poochy", "wiggler", "froggy", "blargg", "lungefish"},
+           {"raphael", "yoshi", "hookbill", "navalpiranha", "kamek", "bowser", "leave"}}
+    startyn, my_state, op_state = main_charselect("net", net_check, global_my_state, global_op_state)
+  end
+
+  --Start Match
+  if startyn then
+    local fake_P1 = P1
+    print("currently_spectating: "..tostring(currently_spectating))
+    local fake_P2 = P2
+    P1 = Stack(1, "vs", my_state.level, my_state.character, my_player_number)
+    P2 = Stack(2, "vs", op_state.level, op_state.character, op_player_number)
+    if currently_spectating then
+      P1.panel_buffer = fake_P1.panel_buffer
+      P1.gpanel_buffer = fake_P1.gpanel_buffer
+    end
+    P2.panel_buffer = fake_P2.panel_buffer
+    P2.gpanel_buffer = fake_P2.gpanel_buffer
+    P1.garbage_target = P2
+    P2.garbage_target = P1
+    P2.pos_x = 172
+    P2.score_x = 410
+    replay.vs = {P="",O="",I="",Q="",R="",in_buf="",
+                P1_level=P1.level,P2_level=P2.level,
+                P1_name=my_name, P2_name=op_name,
+                P1_char=P1.character,P2_char=P2.character,
+                ranked=ranked, do_countdown=true}
+    if currently_spectating and replay_of_match_so_far then --we joined a match in progress
+      replay.vs = replay_of_match_so_far.vs
+      P1.input_buffer = replay_of_match_so_far.vs.in_buf
+      P1.panel_buffer = replay_of_match_so_far.vs.P
+      P1.gpanel_buffer = replay_of_match_so_far.vs.Q
+      P2.input_buffer = replay_of_match_so_far.vs.I
+      P2.panel_buffer = replay_of_match_so_far.vs.O
+      P2.gpanel_buffer = replay_of_match_so_far.vs.R
+      if replay.vs.ranked then
+        match_type = "Ranked"
+        match_type_message = ""
+      else
+        match_type = "Casual"
+      end
+      replay_of_match_so_far = nil
+      P1.play_to_end = true  --this makes foreign_run run until caught up
+      P2.play_to_end = true
+    end
+    if not currently_spectating then
+        ask_for_gpanels("000000")
+        ask_for_panels("000000")
+    end
+    to_print = "Game is starting!\n".."Level: "..P1.level.."\nOpponent's level: "..P2.level
+    if P1.play_to_end or P2.play_to_end then
+      to_print = "Joined a match in progress.\nCatching up..."
+    end
+    for i=1,30 do
+      gprint(to_print,300, 280)
+      do_messages()
+      wait()
+    end
+    local game_start_timeout = 0
+    while P1.panel_buffer == "" or P2.panel_buffer == ""
+      or P1.gpanel_buffer == "" or P2.gpanel_buffer == "" do
+      --testing getting stuck here at "Game is starting"
+      game_start_timeout = game_start_timeout + 1
+      print("game_start_timeout = "..game_start_timeout)
+      print("P1.panel_buffer = "..P1.panel_buffer)
+      print("P2.panel_buffer = "..P2.panel_buffer)
+      print("P1.gpanel_buffer = "..P1.gpanel_buffer)
+      print("P2.gpanel_buffer = "..P2.gpanel_buffer)
+      gprint(to_print,300, 280)
+      do_messages()
+      wait()
+      if game_start_timeout > 250 then
+        return main_dumb_transition, {main_select_mode,
+                        "game start timed out.\n This is a known bug, but you may post it in #panel-attack-bugs-features \nif you'd like.\n"
+                        .."\n".."msg.match_start = "..(tostring(msg.match_start) or "nil")
+                        .."\n".."replay_of_match_so_far = "..(tostring(replay_of_match_so_far) or "nil")
+                        .."\n".."P1.panel_buffer = "..P1.panel_buffer
+                        .."\n".."P2.panel_buffer = "..P2.panel_buffer
+                        .."\n".."P1.gpanel_buffer = "..P1.gpanel_buffer
+                        .."\n".."P2.gpanel_buffer = "..P2.gpanel_buffer,
+                        180}
+      end
+    end
+    P1:starting_state()
+    P2:starting_state()
+    return main_net_vs
+  else
+    do_leave()
+  end
+
+
+  return main_select_mode
+end
+
+
 
 function main_character_select()
   love.audio.stop()
@@ -998,7 +1257,8 @@ function main_net_vs_lobby()
       if msg.create_room or msg.spectate_request_granted then
         global_initialize_room_msg = msg
         character_select_mode = "2p_net_vs"
-        return main_character_select
+        return net_init
+        --return main_character_select
       end
       if msg.unpaired then
         unpaired_players = msg.unpaired
@@ -1398,9 +1658,9 @@ function main_net_vs()
       write_replay_file()
       character_select_mode = "2p_net_vs"
       if currently_spectating then
-        return main_dumb_transition, {main_character_select, end_text, 45, 45}
+        return main_dumb_transition, {net_init, end_text, 45, 45}
       else
-        return main_dumb_transition, {main_character_select, end_text, 45, 180}
+        return main_dumb_transition, {net_init, end_text, 45, 180}
       end
     end
   end
@@ -1485,7 +1745,7 @@ function main_local_vs()
       end_text = "P1 wins ^^"
     end
     if end_text then
-      return main_dumb_transition, {main_select_mode, end_text, 45}
+      return main_dumb_transition, {main_charselect_setup, end_text, 45}
     end
   end
 end

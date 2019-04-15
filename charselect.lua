@@ -115,18 +115,29 @@ local function clean_draw_button(x,y,w,h,str)
   gprint(pstr, render_x+6, render_y+y_add)
 end
 
-function main_charselect(mode)
+function main_charselect(mode, checkfunc, global_my_state, global_op_state)
   --Stop Music And set character select BG
   love.audio.stop()
   stop_the_music()
   bg = charselect
+  local match_type = ""
+  local match_type_message = ""
 
   --Set character select layout
-  local map = {{"level", "level", "level", "level", "level", "level", "ready"},
+  local map = {}
+  if mode == "netranked" then
+    map = {{"match type desired", "match type desired", "match type desired", "match type desired", "level", "level", "ready"},
            {"random", "windy", "sherbet", "thiana", "ruby", "lip", "elias"},
            {"flare", "neris", "seren", "phoenix", "dragon", "thanatos", "cordelia"},
            {"lakitu", "bumpty", "poochy", "wiggler", "froggy", "blargg", "lungefish"},
            {"raphael", "yoshi", "hookbill", "navalpiranha", "kamek", "bowser", "leave"}}
+  else
+    map = {{"level", "level", "level", "level", "level", "level", "ready"},
+           {"random", "windy", "sherbet", "thiana", "ruby", "lip", "elias"},
+           {"flare", "neris", "seren", "phoenix", "dragon", "thanatos", "cordelia"},
+           {"lakitu", "bumpty", "poochy", "wiggler", "froggy", "blargg", "lungefish"},
+           {"raphael", "yoshi", "hookbill", "navalpiranha", "kamek", "bowser", "leave"}}
+  end
 
   --Init selected character/ready/level state
   local my_state = global_my_state or {character=config.character, level=config.level, cursor="level", ready=false}
@@ -174,13 +185,67 @@ function main_charselect(mode)
   local my_cursor_frame = 1
   local op_cursor_frame = 1
 
+  local my_name = config.name or "Player 1"
+  local op_name = "Player 2"
+  op_state.cursor = cursor[2]
+  op_state.selected = selected[2]
+  op_state.active_str = active_str[2]
+
   --Start main loop
   menu_clock = 0
   while true do
     menu_clock = menu_clock + 1
 
+    if checkfunc then
+      local newmystate, matchtypearr
+      new_op_state, newmystate, matchtypearr, leavem, readym = checkfunc(op_state)
+      if leavem then
+        clean_do_leave()
+        return false, nil, nil
+      end
+      if new_op_state then
+        op_state = new_op_state
+      end
+      if readym then
+        return true, my_state, op_state
+      end
+      -- if op_state.cursor and name_to_xy and active_str[2] and cursor[2] then
+      --   cursor[2] = shallowcpy(name_to_xy[op_state.cursor])
+      --   active_str[2] = op_state.cursor
+      -- end
+      -- if op_state.selected then
+      --   selected[2] = op_state.selected
+      -- end
+      -- if op_state.active_str then
+      --   active_str[2] = op_state.active_str
+      -- end
+      -- if currently_spectating then
+      --   my_state = newmystate
+      --   cursor[1] = shallowcpy(name_to_xy[my_state.cursor])
+      --   active_str[1] = my_state.cursor
+      -- end
+      -- if matchtypearr then
+      --   match_type = matchtypearr[1]
+      --   match_type_message = matchtypearr[2]
+      -- end
+    end
+
+    lvlstring = ""
+    if selected[1] and active_str[1] == "level" then
+      lvlstring = my_name.."'s level: < "..my_state.level.." >"
+    else
+      lvlstring = my_name.."'s level: "..my_state.level
+    end
+    if mode ~= "single" then
+        if selected[2] and active_str[2] == "level" then
+          lvlstring = lvlstring .. "\n"..op_name.."'s level: < "..op_state.level.." >"
+        else
+          lvlstring = lvlstring .. "\n"..op_name.."'s level: "..op_state.level
+        end
+    end
+
     --Draw level+ready
-    clean_draw_button(1,1,6,1,"level")
+    clean_draw_button(1,1,6,1,lvlstring)
     clean_draw_button(1,7,1,1,"ready")
 
     --Check blink state for P1
@@ -198,7 +263,7 @@ function main_charselect(mode)
     end
     --------
     --Check blink state for P2
-    if(mode == "local" or mode == "net") then
+    if(mode ~= "single") then
       if op_state.ready then
         player_num = 1
         if (math.floor(menu_clock/cur_blink_frequency)+player_num)%2+1 == player_num then
@@ -264,8 +329,10 @@ function main_charselect(mode)
 
     --TODO: Write/Draw State Info
     local state = ""
-    state = state..my_state.level.."  Char: "..character_display_names[my_state.character].."  Ready: "..tostring(my_state.ready or false).."\n"
-    state = state..op_state.level.."  Char: "..character_display_names[op_state.character].."  Ready: "..tostring(op_state.ready or false)
+    state = state..my_name.."  Char: "..character_display_names[my_state.character].."  Ready: "..tostring(my_state.ready or false).."\n"
+    if mode ~= "single" then
+      state = state..op_name.."  Char: "..character_display_names[op_state.character].."  Ready: "..tostring(op_state.ready or false)
+    end
     gprint(state, 50, 50)
     wait()
 
@@ -274,7 +341,6 @@ function main_charselect(mode)
     --If we aren't spectating, then control
     if not currently_spectating then
 
-        local K = K
         localplayers = 1
         if mode == "local" then
           localplayers = 2
@@ -283,11 +349,11 @@ function main_charselect(mode)
         for i=1,localplayers do
           local k = K[i]
           --Move cursor P1
-          if menu_up(K[i]) then
+          if menu_up(k) then
             if not selected[i] then cursor[i] = clean_move_cursor(cursor[i], map, up) end
-          elseif menu_down(K[i]) then
+          elseif menu_down(k) then
             if not selected[i] then cursor[i] = clean_move_cursor(cursor[i], map, down) end
-          elseif menu_left(K[i]) then
+          elseif menu_left(k) then
             if selected[i] and active_str[i] == "level" then
               if i == 1 then
                 config.level = bound(1, config.level-1, 10)
@@ -297,7 +363,7 @@ function main_charselect(mode)
               end
             end
             if not selected[i] then cursor[i] = clean_move_cursor(cursor[i], map, left) end
-          elseif menu_right(K[i]) then
+          elseif menu_right(k) then
             if selected[i] and active_str[i] == "level" then
               if i == 1 then
                 config.level = bound(1, config.level+1, 10)
@@ -309,14 +375,14 @@ function main_charselect(mode)
             if not selected[i] then cursor[i] = clean_move_cursor(cursor[i], map, right) end
 
           --Selection
-          elseif menu_enter(K[i]) then
+          elseif menu_enter(k) then
             if selectable[active_str[i]] then
               selected[i] = not selected[i]
             elseif active_str[i] == "leave" then
 
               --Leave Online Match
-              if character_select_mode == "2p_net_vs" then
-                if not do_leave() then return false, nil, nil end
+              if mode == "net" or mode == "netranked" then
+                if not clean_do_leave() then return false, nil, nil end
               else
                 return false, nil, nil
               end
@@ -344,12 +410,12 @@ function main_charselect(mode)
             end
 
           --If hitting escape, then get ready to leave
-          elseif menu_escape(K[i]) then
+          elseif menu_escape(k) then
             if active_str[i] == "leave" then
 
               --Leave Online Match
-              if character_select_mode == "2p_net_vs" then
-                if not do_leave() then return false, nil, nil end
+              if mode == "net" or mode == "netranked" then
+                if not clean_do_leave() then return false, nil, nil end
               else
                 return false, nil, nil
               end
@@ -373,7 +439,7 @@ function main_charselect(mode)
         end
 
         --In net match, send our state info
-        if character_select_mode == "2p_net_vs" and not content_equal(my_state, prev_state) and not currently_spectating then
+        if (mode == "net" or mode == "netranked") and not content_equal(my_state, prev_state) and not currently_spectating then
           json_send({menu_state=my_state})
         end
 
@@ -382,7 +448,7 @@ function main_charselect(mode)
 
     else -- (we are are spectating, so do spectator controls)
         if menu_escape(k) then
-          do_leave()
+          clean_do_leave()
           return false, nil, nil
         end
     end
@@ -391,8 +457,12 @@ function main_charselect(mode)
     if mode == "single" and my_state.ready then
       return true, my_state
     end
-    if (mode == "local" or mode == "net") and my_state.ready and op_state.ready then
+    if mode == "local" and my_state.ready and op_state.ready then
       return true, my_state, op_state
+    end
+
+    if mode == "net" or mode == "netranked" then
+      do_messages()
     end
 
   end
